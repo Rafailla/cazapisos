@@ -1,0 +1,8 @@
+supabase
+playwright
+pandas
+openpyxl
+python-dotenv
+requests
+beautifulsoup4
+lxml
