@@ -1,4 +1,5 @@
 """Cliente Supabase y funciones de acceso a datos."""
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 
 from supabase import Client, create_client
@@ -58,3 +59,58 @@ def touch_listing(listing_id: str, seen_at: str) -> None:
         .eq("id", listing_id)
         .execute()
     )
+
+
+def get_available_listings() -> list[dict]:
+    """Todos los listings disponibles, con el nombre de la plataforma ya
+    incluido (aplanado desde el join), ordenados por fecha de primera
+    detección descendente."""
+    response = (
+        get_client()
+        .table("listings")
+        .select("*, platforms(name)")
+        .eq("available", True)
+        .order("first_seen_at", desc=True)
+        .execute()
+    )
+    listings = []
+    for row in response.data:
+        platform = row.pop("platforms", None) or {}
+        row["platform_name"] = platform.get("name")
+        listings.append(row)
+    return listings
+
+
+def update_platform_last_new_listing(platform_id: str) -> None:
+    (
+        get_client()
+        .table("platforms")
+        .update({"last_new_listing_at": datetime.now(timezone.utc).isoformat()})
+        .eq("id", platform_id)
+        .execute()
+    )
+
+
+def get_stale_platforms(days: int = 5) -> list[dict]:
+    """Plataformas activas sin ningún anuncio nuevo desde hace `days` días
+    (o, si nunca han aportado ninguno, creadas hace más de `days` días)."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    stale = []
+    for platform in get_active_platforms():
+        reference = platform.get("last_new_listing_at") or platform.get("created_at")
+        if reference is None:
+            continue
+        if datetime.fromisoformat(reference) < cutoff:
+            stale.append(platform)
+    return stale
+
+
+def log_execution(trigger_type: str, new_listings_count: int, status: str, notes: str | None = None) -> None:
+    get_client().table("execution_log").insert(
+        {
+            "trigger_type": trigger_type,
+            "new_listings_count": new_listings_count,
+            "status": status,
+            "notes": notes,
+        }
+    ).execute()
