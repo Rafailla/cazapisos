@@ -26,11 +26,14 @@ def _provincia_slugs(filters: list[dict]) -> list[str]:
     return sorted({f["province_slug"] for f in filters if f.get("province_slug")})
 
 
-def _process_platform(platform: dict, filters: list[dict]) -> tuple[int, int]:
+def _process_platform(platform: dict, filters: list[dict]) -> tuple[int, int, bool]:
+    """Devuelve (nuevos, existentes, revisado). `revisado` es False cuando la
+    plataforma se salta por falta de scraper/search_url_base — en ese caso no
+    se debe marcar como comprobada (last_checked_at)."""
     fetch = PLATFORM_SCRAPERS.get(platform["name"])
     if fetch is None or not platform.get("search_url_base"):
         print(f"saltando {platform['name']}: falta search_url_base")
-        return 0, 0
+        return 0, 0, False
 
     nuevos = 0
     existentes = 0
@@ -91,7 +94,7 @@ def _process_platform(platform: dict, filters: list[dict]) -> tuple[int, int]:
                 )
                 nuevos += 1
 
-    return nuevos, existentes
+    return nuevos, existentes, True
 
 
 def main() -> int:
@@ -110,9 +113,11 @@ def main() -> int:
         for platform in plataformas:
             if platform.get("method") != "scraping":
                 continue
-            nuevos, existentes = _process_platform(platform, filtros)
+            nuevos, existentes, revisado = _process_platform(platform, filtros)
             print(f"{platform['name']}: {nuevos} anuncios nuevos, {existentes} ya existentes")
             total_nuevos += nuevos
+            if revisado:
+                db.update_platform_check_result(platform["id"], nuevos)
             if nuevos > 0:
                 plataformas_con_novedades.append(platform)
 

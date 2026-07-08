@@ -91,6 +91,21 @@ def update_platform_last_new_listing(platform_id: str) -> None:
     )
 
 
+def update_platform_check_result(platform_id: str, new_count: int) -> None:
+    (
+        get_client()
+        .table("platforms")
+        .update(
+            {
+                "last_checked_at": datetime.now(timezone.utc).isoformat(),
+                "last_run_new_count": new_count,
+            }
+        )
+        .eq("id", platform_id)
+        .execute()
+    )
+
+
 def get_stale_platforms(days: int = 5) -> list[dict]:
     """Plataformas activas sin ningún anuncio nuevo desde hace `days` días
     (o, si nunca han aportado ninguno, creadas hace más de `days` días)."""

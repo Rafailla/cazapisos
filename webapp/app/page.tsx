@@ -1,9 +1,10 @@
 import { supabase } from "@/lib/supabase";
 import { evaluateSearchAvailability } from "@/lib/rateLimit";
 import FiltersEditor from "./FiltersEditor";
+import PlatformStatus from "./PlatformStatus";
 import RecipientsEditor from "./RecipientsEditor";
 import SearchNowButton from "./SearchNowButton";
-import type { FilterRow, RecipientRow } from "./types";
+import type { FilterRow, PlatformStatusRow, RecipientRow } from "./types";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,7 @@ export default async function Page() {
     { data: filters, error: filtersError },
     { data: recipients, error: recipientsError },
     { data: lastExecution, error: executionLogError },
+    { data: platforms, error: platformsError },
   ] = await Promise.all([
     supabase
       .from("filters")
@@ -32,15 +34,19 @@ export default async function Page() {
       .order("executed_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    supabase
+      .from("platforms")
+      .select("id, name, last_checked_at, last_run_new_count")
+      .order("name", { ascending: true }),
   ]);
 
-  if (filtersError || recipientsError || executionLogError) {
+  if (filtersError || recipientsError || executionLogError || platformsError) {
     return (
       <main className="page">
         <h1>cazapisos</h1>
         <p className="error">
           No se ha podido conectar con Supabase:{" "}
-          {filtersError?.message ?? recipientsError?.message ?? executionLogError?.message}
+          {filtersError?.message ?? recipientsError?.message ?? executionLogError?.message ?? platformsError?.message}
         </p>
       </main>
     );
@@ -53,6 +59,7 @@ export default async function Page() {
   return (
     <main className="page">
       <h1>cazapisos</h1>
+      <PlatformStatus platforms={(platforms ?? []) as PlatformStatusRow[]} />
       <SearchNowButton canSearch={canSearch} hoursSinceLast={hoursSinceLast} hoursRemaining={hoursRemaining} />
       <RecipientsEditor initialRecipients={(recipients ?? []) as RecipientRow[]} />
       <FiltersEditor initialFilters={(filters ?? []) as FilterRow[]} />

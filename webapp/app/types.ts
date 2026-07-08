@@ -15,3 +15,10 @@ export type RecipientRow = {
   email: string;
   active: boolean;
 };
+
+export type PlatformStatusRow = {
+  id: string;
+  name: string;
+  last_checked_at: string | null;
+  last_run_new_count: number | null;
+};
