@@ -26,6 +26,18 @@ Limitaciones conocidas de esta prueba de concepto:
   juntos, con su propia URL (`/es/venta/promociones/vivienda/...`) y un precio
   que es el del paquete, no el de una vivienda individual. No encajan en el
   esquema de `listings` (un inmueble = una fila) y se omiten en este PoC.
+- Filtros por característica sin visitar cada ficha: el sitio tiene URLs del
+  tipo /es/venta/vivienda/{provincia}/t-{tag} (tags vistos: "piscina",
+  "aestrenar", "segundamano"). No se pueden combinar varios "t-" en una URL
+  (probado: /t-piscina/t-aestrenar da 404). CONFIRMADO EN REAL (2026-07-08):
+  cuando una combinación provincia+tag no tiene ningún resultado real
+  (`data-total="0"` en el div `.product-list`), el sitio hace el mismo
+  fallback "viviendas cerca de X" ya documentado para zonas — la página SIGUE
+  trayendo tarjetas con class="list-product-buscador" (no promo) de anuncios
+  que NO tienen esa característica. Ejemplo real: granada/t-aestrenar tiene
+  data-total="0" y aun así devuelve 17 tarjetas normales del resto del
+  catálogo de Granada. `fetch_tagged_ids` comprueba data-total antes de
+  confiar en las tarjetas; si es "0", devuelve un conjunto vacío.
 """
 import re
 from urllib.parse import urljoin
@@ -80,12 +92,19 @@ def _parse_card(card) -> dict:
     bathrooms = _extract_number(card.find(id="numero-ban"))
 
     municipality = None
+    address_text = None
     address = card.find(id="description")
     if address:
         spans = [s.get_text(strip=True) for s in address.find_all("span")]
         spans = [s for s in spans if s]
         if len(spans) >= 2:
             municipality = spans[-2].rstrip(",").strip()
+        if spans:
+            # Texto completo (calle/urbanización + municipio + provincia), para
+            # matching.py: algunas localidades de filters.zona son barrios o
+            # urbanizaciones (ej. "La Termica") que no aparecen en
+            # `municipality` sino en el tramo de la calle/urbanización.
+            address_text = ", ".join(spans)
 
     tags = []
     if card.find(class_="etiqueta-novedad"):
@@ -105,8 +124,30 @@ def _parse_card(card) -> dict:
         "bathrooms": int(bathrooms) if bathrooms is not None else None,
         "m2": m2,
         "municipality": municipality,
+        "address": address_text,
         "tags": tags,
     }
+
+
+def fetch_tagged_ids(province_slug: str, tag: str) -> set[str]:
+    """external_id de los anuncios reales (no promos) etiquetados con `tag`
+    (ej. "piscina", "aestrenar", "segundamano") para una provincia. Devuelve
+    un conjunto vacío si el sitio no tiene ningún resultado real para esa
+    combinación (ver nota de "cerca de" en el docstring del módulo) — nunca
+    hace falta abrir la ficha de cada anuncio para saber esto."""
+    url = urljoin(BASE_URL + SEARCH_PATH, f"{province_slug}/t-{tag}")
+    response = requests.get(url, headers=HEADERS, timeout=30)
+    response.raise_for_status()
+    response.encoding = "utf-8"
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    product_list = soup.find("div", class_="product-list")
+    total = product_list.get("data-total") if product_list else None
+    if total in (None, "0"):
+        return set()
+
+    cards = soup.find_all("div", class_="list-product-buscador")
+    return {card.get("data-id") for card in cards if card.get("data-id")}
 
 
 def _extract_number(el) -> float | None:

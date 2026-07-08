@@ -37,16 +37,39 @@ def _process_platform(platform: dict, filters: list[dict]) -> tuple[int, int]:
     ahora = datetime.now(timezone.utc).isoformat()
 
     for slug in _provincia_slugs(filters):
+        # Piscina/condición se resuelven cruzando el external_id contra las
+        # URLs por característica (t-piscina, t-aestrenar, t-segundamano) en
+        # vez de visitar la ficha de cada anuncio. Una llamada por tag y por
+        # provincia, no por anuncio.
+        pool_ids: set[str] = set()
+        nueva_ids: set[str] = set()
+        segunda_mano_ids: set[str] = set()
+        if platform["name"] == "Servihabitat":
+            pool_ids = servihabitat.fetch_tagged_ids(slug, "piscina")
+            nueva_ids = servihabitat.fetch_tagged_ids(slug, "aestrenar")
+            segunda_mano_ids = servihabitat.fetch_tagged_ids(slug, "segundamano")
+
         for listing in fetch(slug):
+            external_id = listing["external_id"]
+            has_pool = external_id in pool_ids
+            if external_id in nueva_ids:
+                condition = "nueva"
+            elif external_id in segunda_mano_ids:
+                condition = "segunda_mano"
+            else:
+                condition = None
+            listing["has_pool"] = has_pool
+            listing["condition"] = condition
+
             matched_ids = matching.matches_any_filter(listing, filters)
             if not matched_ids:
                 continue
 
-            dedup_hash = listing["external_id"]
+            dedup_hash = external_id
             existing = db.find_listing(platform["id"], dedup_hash)
 
             if existing:
-                db.touch_listing(existing["id"], ahora)
+                db.touch_listing(existing["id"], ahora, has_pool, condition)
                 existentes += 1
             else:
                 db.insert_listing(
@@ -62,6 +85,8 @@ def _process_platform(platform: dict, filters: list[dict]) -> tuple[int, int]:
                         "property_type": listing["property_type"],
                         "municipality": listing["municipality"],
                         "matched_filter_ids": matched_ids,
+                        "has_pool": has_pool,
+                        "condition": condition,
                     }
                 )
                 nuevos += 1

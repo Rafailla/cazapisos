@@ -51,11 +51,11 @@ def insert_listing(row: dict) -> None:
     get_client().table("listings").insert(row).execute()
 
 
-def touch_listing(listing_id: str, seen_at: str) -> None:
+def touch_listing(listing_id: str, seen_at: str, has_pool: bool, condition: str | None) -> None:
     (
         get_client()
         .table("listings")
-        .update({"last_seen_available_at": seen_at})
+        .update({"last_seen_available_at": seen_at, "has_pool": has_pool, "condition": condition})
         .eq("id", listing_id)
         .execute()
     )

@@ -42,8 +42,22 @@ def _matches_one(listing: dict, f: dict) -> bool:
 
     zona = f.get("zona")
     if zona:
-        localidades = {normalize(loc) for loc in zona.split(",")}
-        if not listing.get("municipality") or normalize(listing["municipality"]) not in localidades:
+        localidades = [normalize(loc) for loc in zona.split(",") if loc.strip()]
+        municipality = listing.get("municipality")
+        address = listing.get("address")
+        matches_municipality = bool(municipality) and normalize(municipality) in localidades
+        # Algunas localidades de zona son barrios/urbanizaciones (ej. "La
+        # Termica") que no aparecen como municipality sino dentro de la
+        # dirección completa de la tarjeta (calle/urbanización).
+        matches_address = bool(address) and any(loc in normalize(address) for loc in localidades)
+        if not (matches_municipality or matches_address):
             return False
+
+    if f.get("requires_pool") and not listing.get("has_pool"):
+        return False
+
+    property_condition = f.get("property_condition")
+    if property_condition and listing.get("condition") != property_condition:
+        return False
 
     return True
