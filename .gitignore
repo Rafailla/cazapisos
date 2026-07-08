@@ -1,7 +1,9 @@
 .env
+.env.local
 __pycache__/
 *.pyc
 *.xlsx
 node_modules/
 venv/
 .claude/settings.local.json
+.vercel
