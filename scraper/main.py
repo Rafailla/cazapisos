@@ -8,7 +8,7 @@ import db
 import emailer
 import excel_export
 import matching
-from platforms import servihabitat
+from platforms import pisos, servihabitat
 
 DIAS_SIN_NOVEDADES_ALERTA = 5
 
@@ -17,6 +17,15 @@ DIAS_SIN_NOVEDADES_ALERTA = 5
 # todavía) se saltan con un aviso.
 PLATFORM_SCRAPERS = {
     "Servihabitat": servihabitat.fetch_listings,
+    "Pisos.com": pisos.fetch_listings,
+}
+
+# fetch_tagged_ids(province_slug, tag) por plataforma, misma firma en las dos:
+# devuelve un conjunto de external_id (vacío si esa plataforma no tiene un
+# filtro URL real para ese tag concreto — ver cada módulo de plataforma).
+PLATFORM_TAG_FETCHERS = {
+    "Servihabitat": servihabitat.fetch_tagged_ids,
+    "Pisos.com": pisos.fetch_tagged_ids,
 }
 
 
@@ -39,18 +48,21 @@ def _process_platform(platform: dict, filters: list[dict]) -> tuple[int, int, bo
     existentes = 0
     ahora = datetime.now(timezone.utc).isoformat()
 
+    tag_fetch = PLATFORM_TAG_FETCHERS.get(platform["name"])
+
     for slug in _provincia_slugs(filters):
         # Piscina/condición se resuelven cruzando el external_id contra las
-        # URLs por característica (t-piscina, t-aestrenar, t-segundamano) en
-        # vez de visitar la ficha de cada anuncio. Una llamada por tag y por
-        # provincia, no por anuncio.
+        # URLs por característica en vez de visitar la ficha de cada anuncio.
+        # Una llamada por tag y por provincia, no por anuncio. Si la
+        # plataforma no tiene un filtro URL real para un tag concreto, su
+        # fetch_tagged_ids devuelve un conjunto vacío (no falla).
         pool_ids: set[str] = set()
         nueva_ids: set[str] = set()
         segunda_mano_ids: set[str] = set()
-        if platform["name"] == "Servihabitat":
-            pool_ids = servihabitat.fetch_tagged_ids(slug, "piscina")
-            nueva_ids = servihabitat.fetch_tagged_ids(slug, "aestrenar")
-            segunda_mano_ids = servihabitat.fetch_tagged_ids(slug, "segundamano")
+        if tag_fetch:
+            pool_ids = tag_fetch(slug, "piscina")
+            nueva_ids = tag_fetch(slug, "aestrenar")
+            segunda_mano_ids = tag_fetch(slug, "segundamano")
 
         for listing in fetch(slug):
             external_id = listing["external_id"]
@@ -60,7 +72,10 @@ def _process_platform(platform: dict, filters: list[dict]) -> tuple[int, int, bo
             elif external_id in segunda_mano_ids:
                 condition = "segunda_mano"
             else:
-                condition = None
+                # Si la propia plataforma ya conoce la condición sin
+                # necesidad de cruzar tags (ej. Pisos.com, ver pisos.py), se
+                # respeta ese valor en vez de forzar null.
+                condition = listing.get("condition")
             listing["has_pool"] = has_pool
             listing["condition"] = condition
 
