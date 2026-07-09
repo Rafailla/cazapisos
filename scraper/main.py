@@ -8,7 +8,7 @@ import db
 import emailer
 import excel_export
 import matching
-from platforms import pisos, servihabitat
+from platforms import aliseda, pisos, servihabitat, solvia
 
 DIAS_SIN_NOVEDADES_ALERTA = 5
 
@@ -18,6 +18,8 @@ DIAS_SIN_NOVEDADES_ALERTA = 5
 PLATFORM_SCRAPERS = {
     "Servihabitat": servihabitat.fetch_listings,
     "Pisos.com": pisos.fetch_listings,
+    "Solvia": solvia.fetch_listings,
+    "Aliseda": aliseda.fetch_listings,
 }
 
 # fetch_tagged_ids(province_slug, tag) por plataforma, misma firma en las dos:
@@ -26,6 +28,8 @@ PLATFORM_SCRAPERS = {
 PLATFORM_TAG_FETCHERS = {
     "Servihabitat": servihabitat.fetch_tagged_ids,
     "Pisos.com": pisos.fetch_tagged_ids,
+    "Solvia": solvia.fetch_tagged_ids,
+    "Aliseda": aliseda.fetch_tagged_ids,
 }
 
 
@@ -66,7 +70,11 @@ def _process_platform(platform: dict, filters: list[dict]) -> tuple[int, int, bo
 
         for listing in fetch(slug):
             external_id = listing["external_id"]
-            has_pool = external_id in pool_ids
+            # Igual que con condition: si la plataforma ya resuelve piscina
+            # ella misma (ver solvia.py, que no necesita cruzar tags porque
+            # el dato viene directo en cada anuncio) se respeta ese valor en
+            # vez de forzarlo a False por no aparecer en pool_ids.
+            has_pool = external_id in pool_ids or bool(listing.get("has_pool"))
             if external_id in nueva_ids:
                 condition = "nueva"
             elif external_id in segunda_mano_ids:
