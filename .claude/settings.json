@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "ask": [
+      "Edit(**/logica-financiera/**)",
+      "Write(**/logica-financiera/**)",
+      "Edit(**/import_mappings/**)",
+      "Write(**/import_mappings/**)",
+      "Bash(supabase db reset*)",
+      "Bash(supabase migration repair*)"
+    ]
+  }
+}
