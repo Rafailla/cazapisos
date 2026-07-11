@@ -35,6 +35,24 @@ def get_active_recipients(type: str) -> list[dict]:
     return response.data
 
 
+def get_active_recipients_by_group(group_id: str, type: str) -> list[dict]:
+    response = (
+        get_client()
+        .table("recipients")
+        .select("*")
+        .eq("active", True)
+        .eq("type", type)
+        .eq("group_id", group_id)
+        .execute()
+    )
+    return response.data
+
+
+def get_groups() -> list[dict]:
+    response = get_client().table("groups").select("*").execute()
+    return response.data
+
+
 def find_listing(platform_id: str, dedup_hash: str) -> dict | None:
     response = (
         get_client()

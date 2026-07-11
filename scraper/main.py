@@ -39,17 +39,22 @@ def _provincia_slugs(filters: list[dict]) -> list[str]:
     return sorted({f["province_slug"] for f in filters if f.get("province_slug")})
 
 
-def _process_platform(platform: dict, filters: list[dict]) -> tuple[int, int, bool]:
-    """Devuelve (nuevos, existentes, revisado). `revisado` es False cuando la
-    plataforma se salta por falta de scraper/search_url_base — en ese caso no
-    se debe marcar como comprobada (last_checked_at)."""
+def _process_platform(platform: dict, filters: list[dict]) -> tuple[int, int, bool, list[list[str]]]:
+    """Devuelve (nuevos, existentes, revisado, nuevos_matched_filter_ids).
+    `revisado` es False cuando la plataforma se salta por falta de
+    scraper/search_url_base — en ese caso no se debe marcar como comprobada
+    (last_checked_at). `nuevos_matched_filter_ids` trae, por cada anuncio
+    NUEVO insertado en esta llamada, la lista de filter_id que matcheó — se
+    usa luego para saber cuántos anuncios nuevos le tocan a cada grupo en el
+    email (ver _count_new_for_group en main())."""
     fetch = PLATFORM_SCRAPERS.get(platform["name"])
     if fetch is None or not platform.get("search_url_base"):
         print(f"saltando {platform['name']}: falta search_url_base")
-        return 0, 0, False
+        return 0, 0, False, []
 
     nuevos = 0
     existentes = 0
+    nuevos_matched_filter_ids: list[list[str]] = []
     ahora = datetime.now(timezone.utc).isoformat()
 
     tag_fetch = PLATFORM_TAG_FETCHERS.get(platform["name"])
@@ -116,8 +121,29 @@ def _process_platform(platform: dict, filters: list[dict]) -> tuple[int, int, bo
                     }
                 )
                 nuevos += 1
+                nuevos_matched_filter_ids.append(matched_ids)
 
-    return nuevos, existentes, True
+    return nuevos, existentes, True, nuevos_matched_filter_ids
+
+
+def _filter_ids_for_group(filters: list[dict], group_id: str) -> set[str]:
+    return {f["id"] for f in filters if f.get("group_id") == group_id}
+
+
+def _listings_for_group(listings: list[dict], filter_ids_grupo: set[str]) -> list[dict]:
+    """listings.matched_filter_ids ya viene calculado (en insert_listing, ver
+    _process_platform) contra TODOS los filtros activos de TODOS los grupos
+    — aquí solo se cruza con los filter_id de un grupo concreto para saber
+    qué le corresponde a ese grupo en el Excel/email."""
+    return [
+        listing
+        for listing in listings
+        if filter_ids_grupo & set(listing.get("matched_filter_ids") or [])
+    ]
+
+
+def _count_new_for_group(nuevos_matched_filter_ids: list[list[str]], filter_ids_grupo: set[str]) -> int:
+    return sum(1 for matched in nuevos_matched_filter_ids if filter_ids_grupo & set(matched))
 
 
 def main() -> int:
@@ -133,12 +159,14 @@ def main() -> int:
         print(f"{len(plataformas)} plataformas activas, {len(filtros)} perfiles de filtro activos")
 
         plataformas_con_novedades = []
+        todos_nuevos_matched_filter_ids: list[list[str]] = []
         for platform in plataformas:
             if platform.get("method") != "scraping":
                 continue
-            nuevos, existentes, revisado = _process_platform(platform, filtros)
+            nuevos, existentes, revisado, nuevos_matched_filter_ids = _process_platform(platform, filtros)
             print(f"{platform['name']}: {nuevos} anuncios nuevos, {existentes} ya existentes")
             total_nuevos += nuevos
+            todos_nuevos_matched_filter_ids.extend(nuevos_matched_filter_ids)
             if revisado:
                 db.update_platform_check_result(platform["id"], nuevos)
             if nuevos > 0:
@@ -149,8 +177,25 @@ def main() -> int:
 
         if total_nuevos > 0:
             listings = db.get_available_listings()
-            excel_path = excel_export.build_listings_excel(listings)
-            emailer.send_new_listings_email(excel_path, total_nuevos)
+            # Un email por grupo, no uno global: cada grupo (amigos, padres,
+            # ...) solo ve sus propios filtros/anuncios/destinatarios, nunca
+            # los de otro grupo. Un grupo sin anuncios que le encajen esta
+            # vez simplemente no recibe email.
+            for grupo in db.get_groups():
+                filter_ids_grupo = _filter_ids_for_group(filtros, grupo["id"])
+                if not filter_ids_grupo:
+                    continue
+
+                listings_grupo = _listings_for_group(listings, filter_ids_grupo)
+                if not listings_grupo:
+                    continue
+
+                count_nuevos_grupo = _count_new_for_group(todos_nuevos_matched_filter_ids, filter_ids_grupo)
+                recipients = [
+                    r["email"] for r in db.get_active_recipients_by_group(grupo["id"], "new_listings")
+                ]
+                excel_path = excel_export.build_listings_excel(listings_grupo)
+                emailer.send_new_listings_email(recipients, excel_path, count_nuevos_grupo)
 
         ahora = datetime.now(timezone.utc)
         for stale in db.get_stale_platforms(DIAS_SIN_NOVEDADES_ALERTA):

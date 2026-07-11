@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { supabase } from "@/lib/supabase";
 import { triggerScrapeWorkflow } from "@/lib/github";
-import { evaluateSearchAvailability } from "@/lib/rateLimit";
+import { evaluateSearchAvailability, getSearchCooldownHours } from "@/lib/rateLimit";
+import { getActiveGroupId } from "@/lib/session";
 import type { FilterRow, RecipientRow } from "./types";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -57,7 +58,14 @@ export async function updateFilter(id: string, patch: FilterPatch): Promise<Acti
   const validationError = validatePatch(patch);
   if (validationError) return { error: validationError };
 
-  const { error } = await supabase.from("filters").update(patch).eq("id", id);
+  const groupId = await getActiveGroupId();
+  if (!groupId) return { error: "Sesión no válida." };
+
+  // .eq("group_id", groupId) no es solo para no ver perfiles de otros
+  // grupos: una Server Action es un endpoint POST alcanzable directamente,
+  // así que sin este filtro cualquiera logueado podría editar un filtro de
+  // otro grupo pasando su id a mano.
+  const { error } = await supabase.from("filters").update(patch).eq("id", id).eq("group_id", groupId);
   if (error) return { error: error.message };
 
   revalidatePath("/");
@@ -65,6 +73,9 @@ export async function updateFilter(id: string, patch: FilterPatch): Promise<Acti
 }
 
 export async function addFilter(): Promise<ActionResult & { filter?: FilterRow }> {
+  const groupId = await getActiveGroupId();
+  if (!groupId) return { error: "Sesión no válida." };
+
   const { data, error } = await supabase
     .from("filters")
     .insert({
@@ -76,6 +87,7 @@ export async function addFilter(): Promise<ActionResult & { filter?: FilterRow }
       bathrooms_min: 0,
       m2_min: null,
       active: true,
+      group_id: groupId,
     })
     .select("id, profile_name, zona, property_type, price_max, bedrooms_min, bathrooms_min, m2_min, active")
     .single();
@@ -87,7 +99,10 @@ export async function addFilter(): Promise<ActionResult & { filter?: FilterRow }
 }
 
 export async function deleteFilter(id: string): Promise<ActionResult> {
-  const { error } = await supabase.from("filters").delete().eq("id", id);
+  const groupId = await getActiveGroupId();
+  if (!groupId) return { error: "Sesión no válida." };
+
+  const { error } = await supabase.from("filters").delete().eq("id", id).eq("group_id", groupId);
   if (error) return { error: error.message };
 
   revalidatePath("/");
@@ -100,9 +115,12 @@ export async function addRecipientEmail(email: string): Promise<ActionResult & {
     return { error: "Ese email no tiene un formato válido." };
   }
 
+  const groupId = await getActiveGroupId();
+  if (!groupId) return { error: "Sesión no válida." };
+
   const { data, error } = await supabase
     .from("recipients")
-    .insert({ email: trimmed, type: "new_listings", active: true })
+    .insert({ email: trimmed, type: "new_listings", active: true, group_id: groupId })
     .select("id, email, active")
     .single();
 
@@ -113,7 +131,15 @@ export async function addRecipientEmail(email: string): Promise<ActionResult & {
 }
 
 export async function removeRecipientEmail(id: number): Promise<ActionResult> {
-  const { error } = await supabase.from("recipients").delete().eq("id", id).eq("type", "new_listings");
+  const groupId = await getActiveGroupId();
+  if (!groupId) return { error: "Sesión no válida." };
+
+  const { error } = await supabase
+    .from("recipients")
+    .delete()
+    .eq("id", id)
+    .eq("type", "new_listings")
+    .eq("group_id", groupId);
   if (error) return { error: error.message };
 
   revalidatePath("/");
@@ -121,19 +147,17 @@ export async function removeRecipientEmail(id: number): Promise<ActionResult> {
 }
 
 export async function triggerSearch(): Promise<ActionResult> {
-  // Re-comprobamos el límite de 16h en servidor: el botón solo se renderiza
+  // Re-comprobamos el límite en servidor: el botón solo se renderiza
   // pulsable si la página lo permite, pero una Server Action es un endpoint
   // POST alcanzable directamente, así que no basta con ocultar el botón.
-  const { data } = await supabase
-    .from("execution_log")
-    .select("executed_at")
-    .order("executed_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const [{ data }, cooldownHours] = await Promise.all([
+    supabase.from("execution_log").select("executed_at").order("executed_at", { ascending: false }).limit(1).maybeSingle(),
+    getSearchCooldownHours(),
+  ]);
 
-  const { canSearch } = evaluateSearchAvailability(data?.executed_at ?? null);
+  const { canSearch } = evaluateSearchAvailability(data?.executed_at ?? null, cooldownHours);
   if (!canSearch) {
-    return { error: "Todavía no han pasado 16 horas desde la última búsqueda." };
+    return { error: `Todavía no han pasado ${cooldownHours} horas desde la última búsqueda.` };
   }
 
   const result = await triggerScrapeWorkflow();

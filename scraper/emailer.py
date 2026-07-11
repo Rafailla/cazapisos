@@ -34,8 +34,7 @@ def _send(to_addrs: list[str], subject: str, body: str, attachment_path: str | N
         smtp.send_message(message)
 
 
-def send_new_listings_email(excel_path: str, count_new: int) -> None:
-    recipients = [r["email"] for r in db.get_active_recipients("new_listings")]
+def send_new_listings_email(recipients: list[str], excel_path: str, count_new: int) -> None:
     if not recipients:
         return
 
