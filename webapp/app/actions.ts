@@ -9,6 +9,25 @@ import type { FilterRow, RecipientRow } from "./types";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Mismo vocabulario normalizado en las 4 plataformas del scraper (ver
+// scraper/platforms/*.py y CLAUDE.md, sección "Filtros nuevos: ascensor y
+// planta") — null = indiferente.
+const FLOOR_VALUES = [
+  "bajo",
+  "entresuelo",
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "10",
+  "atico",
+];
+
 export type FilterPatch = {
   profile_name?: string;
   active?: boolean;
@@ -18,6 +37,8 @@ export type FilterPatch = {
   bedrooms_min?: number;
   bathrooms_min?: number;
   m2_min?: number | null;
+  requires_elevator?: boolean;
+  floor_preference?: string | null;
 };
 
 export type ActionResult = { error?: string };
@@ -50,6 +71,11 @@ function validatePatch(patch: FilterPatch): string | null {
   }
   if (patch.bathrooms_min !== undefined && patch.bathrooms_min < 0) {
     return "Los baños mínimos no pueden ser negativos.";
+  }
+  if (patch.floor_preference !== undefined && patch.floor_preference !== null) {
+    if (!FLOOR_VALUES.includes(patch.floor_preference)) {
+      return "Planta no válida.";
+    }
   }
   return null;
 }
@@ -88,8 +114,12 @@ export async function addFilter(): Promise<ActionResult & { filter?: FilterRow }
       m2_min: null,
       active: true,
       group_id: groupId,
+      requires_elevator: false,
+      floor_preference: null,
     })
-    .select("id, profile_name, zona, property_type, price_max, bedrooms_min, bathrooms_min, m2_min, active")
+    .select(
+      "id, profile_name, zona, property_type, price_max, bedrooms_min, bathrooms_min, m2_min, active, requires_elevator, floor_preference"
+    )
     .single();
 
   if (error) return { error: error.message };

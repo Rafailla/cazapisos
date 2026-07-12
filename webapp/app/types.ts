@@ -8,6 +8,8 @@ export type FilterRow = {
   bathrooms_min: number | null;
   m2_min: number | null;
   active: boolean;
+  requires_elevator: boolean;
+  floor_preference: string | null;
 };
 
 export type RecipientRow = {

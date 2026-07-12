@@ -60,4 +60,18 @@ def _matches_one(listing: dict, f: dict) -> bool:
     if property_condition and listing.get("condition") != property_condition:
         return False
 
+    # requires_elevator=true exige has_elevator=true confirmado — un
+    # listing con has_elevator=None (la plataforma no lo expone) NO
+    # matchea, porque no se puede confirmar el requisito (distinto de
+    # requires_pool, que no tiene este matiz porque has_pool nunca es None).
+    if f.get("requires_elevator") and listing.get("has_elevator") is not True:
+        return False
+
+    # floor_preference sin valor = indiferente (no filtra, ni siquiera
+    # excluye los listings con floor=None). Con valor, exige coincidencia
+    # exacta con el mismo vocabulario normalizado en las 4 plataformas.
+    floor_preference = f.get("floor_preference")
+    if floor_preference and listing.get("floor") != floor_preference:
+        return False
+
     return True

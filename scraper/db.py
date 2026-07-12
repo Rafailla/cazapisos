@@ -65,15 +65,55 @@ def find_listing(platform_id: str, dedup_hash: str) -> dict | None:
     return response.data[0] if response.data else None
 
 
-def insert_listing(row: dict) -> None:
-    get_client().table("listings").insert(row).execute()
+def insert_listing(row: dict) -> dict:
+    response = get_client().table("listings").insert(row).execute()
+    return response.data[0]
 
 
-def touch_listing(listing_id: str, seen_at: str, has_pool: bool, condition: str | None) -> None:
+def mark_listing_duplicate(listing_id: str, duplicate_group_id: str) -> None:
     (
         get_client()
         .table("listings")
-        .update({"last_seen_available_at": seen_at, "has_pool": has_pool, "condition": condition})
+        .update({"possible_duplicate": True, "duplicate_group_id": duplicate_group_id})
+        .eq("id", listing_id)
+        .execute()
+    )
+
+
+def get_app_setting(key: str, default: float) -> float:
+    """Lee un valor numérico de app_settings (mismo patrón que
+    getSearchCooldownHours en webapp/lib/rateLimit.ts): si la fila no
+    existe o su value no es un número válido, se usa el default en vez de
+    romper — nunca debe bloquear una ejecución por un ajuste mal puesto."""
+    response = get_client().table("app_settings").select("value").eq("key", key).execute()
+    if not response.data:
+        return default
+    try:
+        return float(response.data[0]["value"])
+    except (TypeError, ValueError):
+        return default
+
+
+def touch_listing(
+    listing_id: str,
+    seen_at: str,
+    has_pool: bool,
+    condition: str | None,
+    has_elevator: bool | None = None,
+    floor: str | None = None,
+) -> None:
+    (
+        get_client()
+        .table("listings")
+        .update(
+            {
+                "last_seen_available_at": seen_at,
+                "has_pool": has_pool,
+                "condition": condition,
+                "has_elevator": has_elevator,
+                "floor": floor,
+            }
+        )
         .eq("id", listing_id)
         .execute()
     )

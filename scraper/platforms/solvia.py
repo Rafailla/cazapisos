@@ -43,14 +43,36 @@ Investigación real contra el sitio (2026-07-09):
   /api/inmuebles/v1/promociones y /api/inmuebles/v1/promociones/@id/
   inmuebles vistos en el HTML), pero:
     - GET /api/inmuebles/v1/promociones?idProvincia=29 (y variantes con
-      provincia=, pagina=) -> 400 Bad Request, cuerpo de error vacío.
+      provincia=, provinciaId=, pagina=, sin ningún parámetro) -> siempre
+      400 Bad Request con cuerpo VACÍO (Content-Length: 0), a diferencia
+      del 400 de buscarInmuebles/otros endpoints, que sí devuelven JSON
+      con el detalle del error de validación — esto (más la cabecera
+      CF-Ray presente en la respuesta) sugiere que el 400 aquí lo pone un
+      WAF/gateway de Cloudflare delante del backend real, no la propia
+      app Java, así que no hay pista de validación que seguir por ese
+      lado (reintentado sesión 2026-07-11: mismo resultado con headers
+      completos tipo navegador — Accept-Language, Origin — no solo
+      Accept/Referer).
     - POST /api/inmuebles/v1/promociones {"idProvincia":29} -> 405 Method
-      Not Allowed.
-  No se encontró la forma correcta de pedir ese catálogo en el tiempo
-  investigado. Sin embargo, igual que en Pisos.com, la existencia de ese
-  catálogo aparte (obra nueva vive en /es/obra-nueva + /api/inmuebles/v1/
-  promociones, NO en buscarInmuebles) es la misma evidencia estructural que
-  justifica asumir que buscarInmuebles es el catálogo de segunda mano por
+      Not Allowed (confirmado también con body vacío y con
+      {"provincia":{"id":29}}).
+    - POST /api/inmuebles/v1/buscarPromociones y GET
+      /api/inmuebles/v1/promociones/buscar (nombres de endpoint por
+      analogía con buscarInmuebles) -> 404 Not Found, no existen.
+    - GET /api/inmuebles/v2/promociones?idProvincia=29 -> mismo patrón que
+      ya se vio con buscarInmuebles en v2: 400 con
+      "Identificador de inmueble [promociones] no válido", es decir v2
+      NO tiene una ruta de promociones propia, "promociones" se
+      interpreta como un id contra /api/inmuebles/v2/@id — descartado
+      igual que v2 para buscarInmuebles.
+  No se encontró la forma correcta de pedir ese catálogo tras dos sesiones
+  de intentos razonables (2026-07-09 y 2026-07-11) — se deja documentado
+  y no se sigue insistiendo, es una mejora menor (afecta solo a si
+  condition puede ser "nueva" para Solvia, no bloquea nada crítico). Sin
+  embargo, igual que en Pisos.com, la existencia de ese catálogo aparte
+  (obra nueva vive en /es/obra-nueva + /api/inmuebles/v1/promociones, NO
+  en buscarInmuebles) es la misma evidencia estructural que justifica
+  asumir que buscarInmuebles es el catálogo de segunda mano por
   construcción del sitio. El único indicio de obra nueva encontrado dentro
   de buscarInmuebles fue un resultado con categoriaTipoVivienda.id "11" =
   "En Construccion" — una categoría DISTINTA de "1" (residencial normal),
@@ -63,6 +85,15 @@ Investigación real contra el sitio (2026-07-09):
   condition="segunda_mano" para categoría "1", con el mismo razonamiento
   que pisos.py: no es un valor inventado, es la consecuencia de cómo Solvia
   separa obra nueva en un catálogo aparte que buscarInmuebles no toca.
+- Ascensor y planta (sesión 2026-07-11, filtros nuevos): investigado con
+  datos reales (30 residenciales de Málaga inspeccionados) — no hay ningún
+  campo de ascensor en el resultado (ni en caracteristicas ni en el nivel
+  raíz). Para planta: "altura"/"alturaLibre" en caracteristicas están
+  SIEMPRE a None y "nPlantas" SIEMPRE a 0 en los 30 comprobados —
+  parecen campos de suelo/urbanismo sin rellenar para vivienda normal,
+  no la planta del anuncio. Conclusión: Solvia genuinamente no expone
+  ninguno de los dos — has_elevator y floor quedan siempre en None
+  (nunca False/inventado).
 - Página de ficha de cada anuncio (para construir la URL), patrón
   confirmado con petición real (200 OK):
       /es/comprar/{tipoVivienda.amigable}/{provincia.amigable}/
@@ -179,4 +210,9 @@ def _parse_item(item: dict) -> dict | None:
         # Hecho estructural del catálogo (obra nueva vive aparte en
         # /es/obra-nueva), no un valor inventado — ver docstring del módulo.
         "condition": "segunda_mano",
+        # Ascensor y planta: investigado (sesión 2026-07-11), Solvia
+        # genuinamente no expone ninguno de los dos — ver docstring del
+        # módulo. None explícito, nunca False/adivinado.
+        "has_elevator": None,
+        "floor": None,
     }

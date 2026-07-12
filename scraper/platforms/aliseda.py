@@ -69,20 +69,56 @@ Investigación real contra el sitio (2026-07-09):
       nueva" pero solo 5 de esos 12 tenían Estrenar=1) — parece ser una
       etiqueta de canal/red comercial, no el estado real del inmueble, así
       que se descarta a favor de Estrenar.
-    - property_type: no hay un campo de texto limpio (solo códigos
-      numéricos FkSubtipo sin tabla de traducción encontrada). Se
-      aproxima buscando palabras clave de tipo (piso/chalet/casa/
-      apartamento/ático/dúplex/adosado/villa) al principio de la
-      Description; si no aparece ninguna, se deja en None en vez de
-      inventar un tipo — property_type no lo usa ningún filtro activo
-      ahora mismo (todos están con property_type=null), así que esta
-      limitación no bloquea el matching real.
+    - property_type: no hay un campo de texto limpio en la respuesta de
+      búsqueda (solo códigos numéricos FkSubtipo). Investigado de nuevo
+      (sesión 2026-07-11): la ficha individual (/inmueble/{id}) NO hace
+      ninguna llamada XHR/API — es la misma SPA, resuelve el tipo
+      completamente en el cliente — pero SÍ muestra el tipo limpio en el
+      breadcrumb de la página ya renderizada (ej. "Aliseda / Vivienda /
+      Piso / Andalucía / Málaga / Manilva / ..."), lo que confirma que la
+      traducción FkSubtipo->nombre existe en algún bundle JS de la SPA.
+      No se encontró esa tabla completa en los chunks cargados en las
+      pruebas (main-*.js no se volvió a descargar por estar cacheado), así
+      que en vez de perseguir el bundle completo para un campo no
+      crítico, se confirmaron a mano 2 códigos reales viendo el
+      breadcrumb de fichas concretas: FkSubtipo 36 = "Piso" (ant00030693245,
+      Manilva) y FkSubtipo 32 = "Casa" (ant00038779868, Vélez-Málaga).
+      _parse_item() usa esa tabla parcial (_FKSUBTIPO_NOMBRES) cuando el
+      código es uno de esos dos — más fiable que el keyword-matching
+      porque viene de la propia clasificación del sitio, no de texto
+      libre — y cae al best-effort por palabras clave en Description para
+      cualquier otro FkSubtipo no confirmado todavía. property_type no lo
+      usa ningún filtro activo ahora mismo, así que ninguna de las dos
+      vías bloquea el matching real.
 
 Limitaciones conocidas de este PoC:
-- property_type es un best-effort por palabras clave, no siempre fiable.
+- property_type: solo 2 de los FkSubtipo reales tienen traducción
+  confirmada (36=Piso, 32=Casa) — el resto sigue cayendo al best-effort
+  por palabras clave, no siempre fiable. Si se necesita más cobertura,
+  el bundle main-*.js de la SPA es el sitio donde buscar la tabla
+  completa (no localizado en esta sesión).
 - condition depende de Estrenar, que es un campo de la propia ficha —
   fiable en el sentido de que es literal del inmueble, pero no se ha
   podido contrastar de forma independiente.
+
+Ascensor y planta (sesión 2026-07-11, filtros nuevos):
+- vivienda.Ascensor (0/1) viene directo por anuncio — se usa tal cual para
+  has_elevator, sin cruzar tags. Con datos reales (36 anuncios entre
+  Málaga y Granada): 29 con Ascensor=0, 7 con Ascensor=1 — variación real,
+  no un campo siempre-0 como el "Plantas" de más abajo.
+- vivienda.Plantas SIEMPRE es 0 en todos los anuncios reales comprobados
+  (36/36) — no aporta nada, no se usa (parece ser "nº de plantas del
+  edificio" sin rellenar, no la planta del anuncio).
+- address.Piso SÍ trae la planta real del anuncio para pisos/apartamentos
+  (comprobado con datos reales: valores "PB"/"BJ"/"0" = planta baja, y
+  dígitos "1"/"2"/"3"/"4" = planta numerada). Para casas/chalets viene
+  vacío o con basura ("." , "00") — se ignora directamente si
+  property_type es un tipo de vivienda unifamiliar (ver _HOUSE_TYPES),
+  en vez de intentar interpretar esos valores.
+- Vocabulario normalizado (mismo en las 4 plataformas, ver CLAUDE.md
+  sección "Filtros nuevos: ascensor y planta"): "bajo", "entresuelo",
+  "atico", o el número de planta como texto ("1", "2", ...). None si no
+  aplica (vivienda unifamiliar) o si no hay dato.
 """
 import re
 
@@ -105,6 +141,36 @@ _TYPE_KEYWORDS = [
     "atico", "dúplex", "duplex", "adosado", "villa",
 ]
 _TYPE_RE = re.compile("|".join(re.escape(k) for k in _TYPE_KEYWORDS), re.IGNORECASE)
+
+# Confirmados a mano viendo el breadcrumb de fichas reales (ver docstring
+# del módulo) — solo estos dos, el resto cae al best-effort por palabras
+# clave en _parse_item().
+_FKSUBTIPO_NOMBRES = {
+    36: "piso",
+    32: "casa",
+}
+
+# Tipos de vivienda unifamiliar: no tienen "planta" real, address.Piso para
+# ellos suele venir vacío o con basura ("." , "00") — se ignora.
+_HOUSE_TYPES = {"casa", "chalet", "chalet adosado", "adosado", "villa"}
+
+
+def _normalize_floor(raw_piso: str | None, property_type: str | None) -> str | None:
+    if property_type in _HOUSE_TYPES:
+        return None
+    if not raw_piso:
+        return None
+    value = str(raw_piso).strip().upper()
+    if value in {"PB", "BJ", "BAJO"}:
+        return "bajo"
+    if value in {"EN", "ENTRESUELO"}:
+        return "entresuelo"
+    if value in {"AT", "ATICO", "ÁTICO"}:
+        return "atico"
+    if value.isdigit():
+        n = int(value)
+        return "bajo" if n == 0 else str(n)
+    return None
 
 
 def fetch_listings(province_slug: str) -> list[dict]:
@@ -174,11 +240,17 @@ def _parse_item(item: dict) -> dict | None:
         vivienda.get("Piscina") or vivienda.get("PiscinaComunitaria") or vivienda.get("PiscinaPropia")
     )
 
-    property_type = None
-    description = item.get("Description") or ""
-    match = _TYPE_RE.search(description)
-    if match:
-        property_type = match.group().lower()
+    property_type = _FKSUBTIPO_NOMBRES.get(item.get("FkSubtipo"))
+    if property_type is None:
+        description = item.get("Description") or ""
+        match = _TYPE_RE.search(description)
+        if match:
+            property_type = match.group().lower()
+
+    raw_ascensor = vivienda.get("Ascensor")
+    has_elevator = bool(raw_ascensor) if raw_ascensor is not None else None
+
+    floor = _normalize_floor(address.get("Piso"), property_type)
 
     return {
         "external_id": external_id,
@@ -193,4 +265,6 @@ def _parse_item(item: dict) -> dict | None:
         "tags": [],
         "has_pool": has_pool,
         "condition": condition,
+        "has_elevator": has_elevator,
+        "floor": floor,
     }

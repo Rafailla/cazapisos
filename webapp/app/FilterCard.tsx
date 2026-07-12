@@ -13,6 +13,26 @@ const PROPERTY_TYPES: { value: string; label: string }[] = [
   { value: "duplex", label: "Dúplex" },
 ];
 
+// Mismo vocabulario normalizado que produce el scraper en las 4
+// plataformas (ver scraper/platforms/*.py y CLAUDE.md, sección "Filtros
+// nuevos: ascensor y planta") — "" = indiferente (floor_preference=null).
+const FLOOR_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "Indiferente" },
+  { value: "bajo", label: "Bajo" },
+  { value: "entresuelo", label: "Entresuelo" },
+  { value: "1", label: "1ª planta" },
+  { value: "2", label: "2ª planta" },
+  { value: "3", label: "3ª planta" },
+  { value: "4", label: "4ª planta" },
+  { value: "5", label: "5ª planta" },
+  { value: "6", label: "6ª planta" },
+  { value: "7", label: "7ª planta" },
+  { value: "8", label: "8ª planta" },
+  { value: "9", label: "9ª planta" },
+  { value: "10", label: "10ª planta" },
+  { value: "atico", label: "Ático" },
+];
+
 function zonaToList(zona: string | null): string[] {
   return (zona ?? "")
     .split(",")
@@ -273,6 +293,37 @@ export default function FilterCard({
               +
             </button>
           </div>
+        </div>
+      </div>
+
+      <div className="field-row">
+        <div className="field">
+          <span className="field-label">Planta</span>
+          <select
+            value={filter.floor_preference ?? ""}
+            onChange={(e) => save({ floor_preference: e.target.value === "" ? null : e.target.value })}
+            disabled={pending}
+          >
+            {FLOOR_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="field">
+          <span className="field-label">Ascensor</span>
+          <label className="switch">
+            <input
+              type="checkbox"
+              checked={filter.requires_elevator}
+              onChange={(e) => save({ requires_elevator: e.target.checked })}
+              disabled={pending}
+            />
+            <span className="switch-track" />
+            <span className="switch-label">{filter.requires_elevator ? "Requerido" : "Indiferente"}</span>
+          </label>
         </div>
       </div>
 

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 import config
 import db
+import dedup
 import emailer
 import excel_export
 import matching
@@ -39,14 +40,17 @@ def _provincia_slugs(filters: list[dict]) -> list[str]:
     return sorted({f["province_slug"] for f in filters if f.get("province_slug")})
 
 
-def _process_platform(platform: dict, filters: list[dict]) -> tuple[int, int, bool, list[list[str]]]:
-    """Devuelve (nuevos, existentes, revisado, nuevos_matched_filter_ids).
-    `revisado` es False cuando la plataforma se salta por falta de
-    scraper/search_url_base — en ese caso no se debe marcar como comprobada
-    (last_checked_at). `nuevos_matched_filter_ids` trae, por cada anuncio
-    NUEVO insertado en esta llamada, la lista de filter_id que matcheó — se
-    usa luego para saber cuántos anuncios nuevos le tocan a cada grupo en el
-    email (ver _count_new_for_group en main())."""
+def _process_platform(platform: dict, filters: list[dict]) -> tuple[int, int, bool, list[dict]]:
+    """Devuelve (nuevos, existentes, revisado, nuevos_listings). `revisado`
+    es False cuando la plataforma se salta por falta de scraper/
+    search_url_base — en ese caso no se debe marcar como comprobada
+    (last_checked_at). `nuevos_listings` trae, por cada anuncio NUEVO
+    insertado en esta llamada, un dict con su id de BD ya asignado más los
+    campos que hacen falta luego: matched_filter_ids (para el conteo de
+    nuevos por grupo, ver _count_new_for_group) y price/m2/bedrooms/
+    bathrooms/municipality/address/platform_id (para la deduplicación entre
+    plataformas, ver dedup.py — address solo vive aquí en memoria, la
+    tabla listings no la guarda)."""
     fetch = PLATFORM_SCRAPERS.get(platform["name"])
     if fetch is None or not platform.get("search_url_base"):
         print(f"saltando {platform['name']}: falta search_url_base")
@@ -54,7 +58,7 @@ def _process_platform(platform: dict, filters: list[dict]) -> tuple[int, int, bo
 
     nuevos = 0
     existentes = 0
-    nuevos_matched_filter_ids: list[list[str]] = []
+    nuevos_listings: list[dict] = []
     ahora = datetime.now(timezone.utc).isoformat()
 
     tag_fetch = PLATFORM_TAG_FETCHERS.get(platform["name"])
@@ -68,10 +72,12 @@ def _process_platform(platform: dict, filters: list[dict]) -> tuple[int, int, bo
         pool_ids: set[str] = set()
         nueva_ids: set[str] = set()
         segunda_mano_ids: set[str] = set()
+        ascensor_ids: set[str] = set()
         if tag_fetch:
             pool_ids = tag_fetch(slug, "piscina")
             nueva_ids = tag_fetch(slug, "aestrenar")
             segunda_mano_ids = tag_fetch(slug, "segundamano")
+            ascensor_ids = tag_fetch(slug, "ascensor")
 
         for listing in fetch(slug):
             external_id = listing["external_id"]
@@ -92,6 +98,26 @@ def _process_platform(platform: dict, filters: list[dict]) -> tuple[int, int, bo
             listing["has_pool"] = has_pool
             listing["condition"] = condition
 
+            # has_elevator: si la plataforma ya trae la clave en su dict
+            # (Aliseda/Solvia, resuelto directo por anuncio — incluido el
+            # caso Solvia=None por falta de dato real), se respeta TAL
+            # CUAL, incluso si es None — a diferencia de has_pool, aquí
+            # "None" (no lo sabemos) es un valor legítimo y distinto de
+            # False (confirmado que no tiene), así que NO se usa bool().
+            # Solo si la plataforma no la trae en absoluto (Servihabitat/
+            # Pisos.com) se cae al cruce de tags, que para "ascensor" es
+            # un filtro real y confirmado en las dos, así que "no está en
+            # ascensor_ids" sí es un False de verdad, no un None disfrazado.
+            if "has_elevator" in listing:
+                has_elevator = listing["has_elevator"]
+            else:
+                has_elevator = external_id in ascensor_ids
+            listing["has_elevator"] = has_elevator
+            # floor: siempre resuelto directo por la propia plataforma (o
+            # None si no aplica/no lo expone) — ninguna de las 4 tiene un
+            # filtro URL de planta real, así que no hay tags que cruzar.
+            floor = listing.get("floor")
+
             matched_ids = matching.matches_any_filter(listing, filters)
             if not matched_ids:
                 continue
@@ -100,10 +126,10 @@ def _process_platform(platform: dict, filters: list[dict]) -> tuple[int, int, bo
             existing = db.find_listing(platform["id"], dedup_hash)
 
             if existing:
-                db.touch_listing(existing["id"], ahora, has_pool, condition)
+                db.touch_listing(existing["id"], ahora, has_pool, condition, has_elevator, floor)
                 existentes += 1
             else:
-                db.insert_listing(
+                inserted = db.insert_listing(
                     {
                         "platform_id": platform["id"],
                         "external_id": listing["external_id"],
@@ -118,12 +144,26 @@ def _process_platform(platform: dict, filters: list[dict]) -> tuple[int, int, bo
                         "matched_filter_ids": matched_ids,
                         "has_pool": has_pool,
                         "condition": condition,
+                        "has_elevator": has_elevator,
+                        "floor": floor,
                     }
                 )
                 nuevos += 1
-                nuevos_matched_filter_ids.append(matched_ids)
+                nuevos_listings.append(
+                    {
+                        "id": inserted["id"],
+                        "platform_id": platform["id"],
+                        "price": listing["price"],
+                        "m2": listing["m2"],
+                        "bedrooms": listing["bedrooms"],
+                        "bathrooms": listing["bathrooms"],
+                        "municipality": listing["municipality"],
+                        "address": listing.get("address"),
+                        "matched_filter_ids": matched_ids,
+                    }
+                )
 
-    return nuevos, existentes, True, nuevos_matched_filter_ids
+    return nuevos, existentes, True, nuevos_listings
 
 
 def _filter_ids_for_group(filters: list[dict], group_id: str) -> set[str]:
@@ -142,8 +182,8 @@ def _listings_for_group(listings: list[dict], filter_ids_grupo: set[str]) -> lis
     ]
 
 
-def _count_new_for_group(nuevos_matched_filter_ids: list[list[str]], filter_ids_grupo: set[str]) -> int:
-    return sum(1 for matched in nuevos_matched_filter_ids if filter_ids_grupo & set(matched))
+def _count_new_for_group(nuevos_listings: list[dict], filter_ids_grupo: set[str]) -> int:
+    return sum(1 for listing in nuevos_listings if filter_ids_grupo & set(listing.get("matched_filter_ids") or []))
 
 
 def main() -> int:
@@ -159,14 +199,14 @@ def main() -> int:
         print(f"{len(plataformas)} plataformas activas, {len(filtros)} perfiles de filtro activos")
 
         plataformas_con_novedades = []
-        todos_nuevos_matched_filter_ids: list[list[str]] = []
+        todos_nuevos_listings: list[dict] = []
         for platform in plataformas:
             if platform.get("method") != "scraping":
                 continue
-            nuevos, existentes, revisado, nuevos_matched_filter_ids = _process_platform(platform, filtros)
+            nuevos, existentes, revisado, nuevos_listings = _process_platform(platform, filtros)
             print(f"{platform['name']}: {nuevos} anuncios nuevos, {existentes} ya existentes")
             total_nuevos += nuevos
-            todos_nuevos_matched_filter_ids.extend(nuevos_matched_filter_ids)
+            todos_nuevos_listings.extend(nuevos_listings)
             if revisado:
                 db.update_platform_check_result(platform["id"], nuevos)
             if nuevos > 0:
@@ -174,6 +214,13 @@ def main() -> int:
 
         for platform in plataformas_con_novedades:
             db.update_platform_last_new_listing(platform["id"])
+
+        # Deduplicación ENTRE plataformas: tras insertar todos los anuncios
+        # nuevos de esta ejecución (de todas las plataformas), comparar cada
+        # uno contra los demás listings disponibles de otra plataforma y
+        # marcar posibles duplicados (nunca fusiona ni descarta nada, ver
+        # dedup.py). No cambia matching.py ni el conteo de total_nuevos.
+        dedup.mark_possible_duplicates(todos_nuevos_listings)
 
         if total_nuevos > 0:
             listings = db.get_available_listings()
@@ -190,7 +237,7 @@ def main() -> int:
                 if not listings_grupo:
                     continue
 
-                count_nuevos_grupo = _count_new_for_group(todos_nuevos_matched_filter_ids, filter_ids_grupo)
+                count_nuevos_grupo = _count_new_for_group(todos_nuevos_listings, filter_ids_grupo)
                 recipients = [
                     r["email"] for r in db.get_active_recipients_by_group(grupo["id"], "new_listings")
                 ]

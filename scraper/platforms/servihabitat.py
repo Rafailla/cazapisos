@@ -38,6 +38,25 @@ Limitaciones conocidas de esta prueba de concepto:
   data-total="0" y aun así devuelve 17 tarjetas normales del resto del
   catálogo de Granada. `fetch_tagged_ids` comprueba data-total antes de
   confiar en las tarjetas; si es "0", devuelve un conjunto vacío.
+
+Ascensor y planta (sesión 2026-07-11, filtros nuevos):
+- Ascensor: t-ascensor es un filtro URL real igual que t-piscina —
+  comprobado con datos reales (Málaga: 12 tarjetas sin filtrar -> 3 con
+  t-ascensor, conjunto realmente distinto, mismo patrón que piscina). No
+  hizo falta tocar este módulo: fetch_tagged_ids ya es genérica para
+  cualquier tag, "ascensor" funciona automáticamente en cuanto main.py lo
+  pida (ver PLATFORM_TAG_FETCHERS/tag_fetch en main.py).
+- Planta: NO se encontró ninguna señal fiable. Se investigó: (a) las
+  tarjetas de resultado tienen un bloque de datos analítico con
+  `productExtra: [...]` (lift/swimming-pool/garage/...) — "lift" confirma
+  ascensor, pero ese array no incluye nunca planta; (b) el sitio SÍ tiene
+  checkboxes de filtro "Ático"/"Planta baja", pero son en realidad
+  subtipos de vivienda (subtipologia_vivienda2/4), no un atributo de
+  planta independiente; (c) probado /t-atico, /t-plantabaja, /t-bajo como
+  URLs — ninguno filtra de verdad (mismas 12 tarjetas que sin filtro,
+  igual que el patrón ya documentado de "fallback cerca de"). Conclusión:
+  Servihabitat no expone la planta del anuncio en ningún sitio accesible
+  sin abrir cada ficha individual — floor queda siempre en None.
 """
 import re
 from urllib.parse import urljoin

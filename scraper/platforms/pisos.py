@@ -64,6 +64,24 @@ Limitaciones conocidas de este PoC (mismo espíritu que Servihabitat):
   filtro de piscina (~30 tarjetas) — no se pagina.
 - Zona: fetch_listings() no filtra por municipio/barrio, igual que
   Servihabitat — matching.py se encarga con listing['address'].
+
+Ascensor y planta (sesión 2026-07-11, filtros nuevos):
+- Ascensor: /venta/pisos-{provincia}/ascensor/ es un filtro URL real,
+  mismo patrón que /piscina/ — comprobado con datos reales (Málaga: 30
+  tarjetas sin filtrar vs 30 con /ascensor/, pero con ids DISTINTOS entre
+  los dos conjuntos — confirma que sí filtra de verdad, la coincidencia de
+  cantidad es casualidad de que ambos llenan una página completa).
+- Planta: SÍ aparece como una característica más en la tarjeta
+  (p.ad-preview__char, la misma clase que ya se usaba para habs/baños/m2)
+  — el código anterior la veía pero la ignoraba a propósito (ver
+  docstring histórico de "Estructura de cada tarjeta" arriba). Con datos
+  reales de Málaga y Granada se vieron los valores "1ª planta".."7ª
+  planta" y "Principal" — "Principal" es un piso histórico español sin
+  posición numérica fija entre plantas (varía según el edificio) así que
+  NO se mapea a ningún número, queda en None en vez de adivinar. No se
+  vieron "Bajo"/"Entresuelo"/"Ático" en la muestra pero se contemplan en
+  _normalize_floor() por si aparecen en otras búsquedas. Para
+  casa/chalet/adosado/villa (sin planta real) se ignora directamente.
 """
 import re
 from urllib.parse import urljoin
@@ -76,6 +94,11 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; cazapisos-bot/1.0)"}
 
 _HREF_RE = re.compile(r"^/comprar/")
 _NUMBER_RE = re.compile(r"[\d.,]+")
+_FLOOR_NUMBER_RE = re.compile(r"(\d+)\s*ª?\s*planta")
+
+# Tipos sin planta real — se ignora floor_text para ellos aunque la
+# tarjeta trajera algo (no debería pasar, pero por si acaso).
+_HOUSE_TYPES = {"casa", "chalet", "adosado", "villa"}
 
 
 def fetch_listings(province_slug: str) -> list[dict]:
@@ -86,15 +109,18 @@ def fetch_listings(province_slug: str) -> list[dict]:
     return _fetch_cards(url)
 
 
+_TAGS_CON_FILTRO_URL_REAL = {"piscina", "ascensor"}
+
+
 def fetch_tagged_ids(province_slug: str, tag: str) -> set[str]:
     """external_id de la primera página de resultados con una característica
-    (por ahora solo "piscina" tiene un filtro URL real y fiable en Pisos.com
-    — para cualquier otro tag se devuelve un conjunto vacío en vez de
-    inventar una URL que no se ha confirmado)."""
-    if tag != "piscina":
+    ("piscina" y "ascensor" tienen un filtro URL real y confirmado en
+    Pisos.com — para cualquier otro tag se devuelve un conjunto vacío en
+    vez de inventar una URL que no se ha confirmado)."""
+    if tag not in _TAGS_CON_FILTRO_URL_REAL:
         return set()
 
-    url = urljoin(BASE_URL, f"/venta/pisos-{province_slug}/piscina/fecharecientedesde-desc/")
+    url = urljoin(BASE_URL, f"/venta/pisos-{province_slug}/{tag}/fecharecientedesde-desc/")
     cards = _fetch_cards(url)
     return {listing["external_id"] for listing in cards if listing.get("external_id")}
 
@@ -135,6 +161,7 @@ def _parse_card(card) -> dict | None:
         price = int(digits) if digits else None
 
     bedrooms = bathrooms = m2 = None
+    floor_text = None
     for char_el in card.find_all("p", class_="ad-preview__char"):
         text = char_el.get_text(strip=True)
         lowered = text.lower()
@@ -144,10 +171,14 @@ def _parse_card(card) -> dict | None:
             bathrooms = _to_int(_parse_number(text))
         elif "m²" in lowered or "m2" in lowered:
             m2 = _parse_number(text)
+        elif "planta" in lowered or "principal" in lowered or "bajo" in lowered or "entresuelo" in lowered or "ático" in lowered or "atico" in lowered:
+            floor_text = text
 
     subtitle_el = card.find("p", class_="ad-preview__subtitle")
     subtitle = subtitle_el.get_text(strip=True) if subtitle_el else None
     municipality = _extract_municipality(subtitle)
+
+    floor = _normalize_floor(floor_text, property_type)
 
     return {
         "external_id": external_id,
@@ -163,6 +194,7 @@ def _parse_card(card) -> dict | None:
         # Hecho estructural del catálogo, no un cruce de tags como en
         # Servihabitat: ver nota de "Obra nueva" / "segunda mano" arriba.
         "condition": "segunda_mano",
+        "floor": floor,
     }
 
 
@@ -201,3 +233,27 @@ def _parse_number(text: str) -> float | None:
 
 def _to_int(value: float | None) -> int | None:
     return int(value) if value is not None else None
+
+
+def _normalize_floor(floor_text: str | None, property_type: str | None) -> str | None:
+    """Vocabulario normalizado compartido con las demás plataformas (ver
+    CLAUDE.md, sección "Filtros nuevos: ascensor y planta"): "bajo",
+    "entresuelo", "atico", o el número de planta como texto. None si no
+    aplica (vivienda unifamiliar) o no se pudo interpretar el texto."""
+    if property_type in _HOUSE_TYPES or not floor_text:
+        return None
+
+    lowered = floor_text.lower()
+    if "bajo" in lowered:
+        return "bajo"
+    if "entresuelo" in lowered:
+        return "entresuelo"
+    if "ático" in lowered or "atico" in lowered:
+        return "atico"
+    if "principal" in lowered:
+        # Planta histórica sin posición numérica fija entre edificios — no
+        # se mapea a ningún número para no inventar un valor.
+        return None
+
+    match = _FLOOR_NUMBER_RE.search(lowered)
+    return match.group(1) if match else None

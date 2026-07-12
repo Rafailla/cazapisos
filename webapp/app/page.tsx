@@ -28,7 +28,9 @@ export default async function Page() {
   ] = await Promise.all([
     supabase
       .from("filters")
-      .select("id, profile_name, zona, property_type, price_max, bedrooms_min, bathrooms_min, m2_min, active")
+      .select(
+        "id, profile_name, zona, property_type, price_max, bedrooms_min, bathrooms_min, m2_min, active, requires_elevator, floor_preference"
+      )
       .eq("group_id", groupId)
       .order("created_at", { ascending: true }),
     supabase
