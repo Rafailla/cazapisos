@@ -130,6 +130,37 @@ export async function addFilter(): Promise<ActionResult & { filter?: FilterRow }
   return { filter: data as FilterRow };
 }
 
+export async function duplicateFilter(id: string): Promise<ActionResult & { filter?: FilterRow }> {
+  const groupId = await getActiveGroupId();
+  if (!groupId) return { error: "Sesión no válida." };
+
+  // .eq("group_id", groupId) aquí también: sin esto, pasando el id de un
+  // filtro de otro grupo se podría leer (y duplicar) un perfil ajeno.
+  const { data: original, error: fetchError } = await supabase
+    .from("filters")
+    .select("*")
+    .eq("id", id)
+    .eq("group_id", groupId)
+    .single();
+
+  if (fetchError || !original) return { error: fetchError?.message ?? "Filtro no encontrado." };
+
+  const { id: _id, created_at: _createdAt, group_id: _groupId, profile_name, ...rest } = original;
+
+  const { data, error } = await supabase
+    .from("filters")
+    .insert({ ...rest, profile_name: `${profile_name} (copia)`, group_id: groupId })
+    .select(
+      "id, profile_name, zona, property_type, price_max, bedrooms_min, bathrooms_min, m2_min, active, requires_elevator, floor_preference, requires_garage"
+    )
+    .single();
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/");
+  return { filter: data as FilterRow };
+}
+
 export async function deleteFilter(id: string): Promise<ActionResult> {
   const groupId = await getActiveGroupId();
   if (!groupId) return { error: "Sesión no válida." };

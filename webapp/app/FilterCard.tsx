@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { deleteFilter, updateFilter, type FilterPatch } from "./actions";
+import { deleteFilter, duplicateFilter, updateFilter, type FilterPatch } from "./actions";
 import type { FilterRow } from "./types";
 
 const PROPERTY_TYPES: { value: string; label: string }[] = [
@@ -44,10 +44,12 @@ export default function FilterCard({
   filter,
   onUpdated,
   onDeleted,
+  onDuplicated,
 }: {
   filter: FilterRow;
   onUpdated: (id: string, patch: FilterPatch) => void;
   onDeleted: (id: string) => void;
+  onDuplicated: (filter: FilterRow) => void;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -155,6 +157,18 @@ export default function FilterCard({
         return;
       }
       onDeleted(filter.id);
+    });
+  }
+
+  function handleDuplicate() {
+    setError(null);
+    startTransition(async () => {
+      const result = await duplicateFilter(filter.id);
+      if (result.error || !result.filter) {
+        setError(result.error ?? "No se ha podido duplicar la búsqueda.");
+        return;
+      }
+      onDuplicated(result.filter);
     });
   }
 
@@ -344,6 +358,9 @@ export default function FilterCard({
       {error && <p className="error">{error}</p>}
 
       <footer className="filter-card-footer">
+        <button type="button" onClick={handleDuplicate} disabled={pending}>
+          Duplicar
+        </button>
         {confirmingDelete ? (
           <div className="confirm-delete">
             <span>¿Seguro que quieres eliminar esta búsqueda?</span>

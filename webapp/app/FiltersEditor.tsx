@@ -30,13 +30,23 @@ export default function FiltersEditor({ initialFilters }: { initialFilters: Filt
     setFilters((prev) => prev.filter((f) => f.id !== id));
   }
 
+  function handleDuplicated(filter: FilterRow) {
+    setFilters((prev) => [...prev, filter]);
+  }
+
   return (
     <section className="filters-section">
       <h2>Perfiles de búsqueda</h2>
       {filters.length === 0 && <p className="empty-hint">Todavía no hay ningún perfil de búsqueda.</p>}
       <div className="filter-grid">
         {filters.map((f) => (
-          <FilterCard key={f.id} filter={f} onUpdated={handleUpdated} onDeleted={handleDeleted} />
+          <FilterCard
+            key={f.id}
+            filter={f}
+            onUpdated={handleUpdated}
+            onDeleted={handleDeleted}
+            onDuplicated={handleDuplicated}
+          />
         ))}
       </div>
       <button type="button" className="add-filter-btn" onClick={handleAdd} disabled={pending}>
