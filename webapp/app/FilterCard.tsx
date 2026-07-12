@@ -325,6 +325,20 @@ export default function FilterCard({
             <span className="switch-label">{filter.requires_elevator ? "Requerido" : "Indiferente"}</span>
           </label>
         </div>
+
+        <div className="field">
+          <span className="field-label">Garaje</span>
+          <label className="switch">
+            <input
+              type="checkbox"
+              checked={filter.requires_garage}
+              onChange={(e) => save({ requires_garage: e.target.checked })}
+              disabled={pending}
+            />
+            <span className="switch-track" />
+            <span className="switch-label">{filter.requires_garage ? "Requerido" : "Indiferente"}</span>
+          </label>
+        </div>
       </div>
 
       {error && <p className="error">{error}</p>}

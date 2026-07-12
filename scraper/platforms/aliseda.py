@@ -119,6 +119,13 @@ Ascensor y planta (sesión 2026-07-11, filtros nuevos):
   sección "Filtros nuevos: ascensor y planta"): "bajo", "entresuelo",
   "atico", o el número de planta como texto ("1", "2", ...). None si no
   aplica (vivienda unifamiliar) o si no hay dato.
+
+Cochera/garaje (sesión 2026-07-12, filtro nuevo):
+- vivienda.Garage (0/1) viene directo por anuncio, mismo patrón que
+  Ascensor — variación real comprobada (36 anuncios: 29 con Garage=0, 7
+  con Garage=1). vivienda.NumGarages (nº de plazas) confirma la misma
+  distribución (0 cuando Garage=0, 1 o 2 cuando Garage=1) — no se usa
+  directamente, solo has_garage como booleano.
 """
 import re
 
@@ -250,6 +257,9 @@ def _parse_item(item: dict) -> dict | None:
     raw_ascensor = vivienda.get("Ascensor")
     has_elevator = bool(raw_ascensor) if raw_ascensor is not None else None
 
+    raw_garage = vivienda.get("Garage")
+    has_garage = bool(raw_garage) if raw_garage is not None else None
+
     floor = _normalize_floor(address.get("Piso"), property_type)
 
     return {
@@ -266,5 +276,6 @@ def _parse_item(item: dict) -> dict | None:
         "has_pool": has_pool,
         "condition": condition,
         "has_elevator": has_elevator,
+        "has_garage": has_garage,
         "floor": floor,
     }

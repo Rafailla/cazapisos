@@ -82,6 +82,14 @@ Ascensor y planta (sesión 2026-07-11, filtros nuevos):
   vieron "Bajo"/"Entresuelo"/"Ático" en la muestra pero se contemplan en
   _normalize_floor() por si aparecen en otras búsquedas. Para
   casa/chalet/adosado/villa (sin planta real) se ignora directamente.
+
+Cochera/garaje (sesión 2026-07-12, filtro nuevo):
+- El sitio internamente lo llama "parking" (data-ga-event="parking" en el
+  checkbox de filtro, aunque la etiqueta visible sea "Garaje") — /venta/
+  pisos-{provincia}/parking/ es un filtro URL real, mismo patrón que
+  piscina/ascensor (comprobado: conjunto de ids distinto al de sin
+  filtrar). fetch_tagged_ids() traduce el tag canónico "garaje" (el mismo
+  nombre que usan las demás plataformas) a ese segmento de URL real.
 """
 import re
 from urllib.parse import urljoin
@@ -109,18 +117,29 @@ def fetch_listings(province_slug: str) -> list[dict]:
     return _fetch_cards(url)
 
 
-_TAGS_CON_FILTRO_URL_REAL = {"piscina", "ascensor"}
+# tag canónico (el que usa main.py) -> segmento de URL real de pisos.com.
+# "piscina"/"ascensor" coinciden con su propio nombre; "garaje" NO — el
+# sitio usa "parking" internamente (data-ga-event="parking", etiqueta
+# visible "Garaje" — comprobado con datos reales, sesión 2026-07-12:
+# /parking/ da un conjunto de ids distinto al de sin filtrar, mismo
+# patrón que piscina/ascensor).
+_TAG_URL_SEGMENTS = {
+    "piscina": "piscina",
+    "ascensor": "ascensor",
+    "garaje": "parking",
+}
 
 
 def fetch_tagged_ids(province_slug: str, tag: str) -> set[str]:
     """external_id de la primera página de resultados con una característica
-    ("piscina" y "ascensor" tienen un filtro URL real y confirmado en
-    Pisos.com — para cualquier otro tag se devuelve un conjunto vacío en
-    vez de inventar una URL que no se ha confirmado)."""
-    if tag not in _TAGS_CON_FILTRO_URL_REAL:
+    ("piscina", "ascensor" y "garaje" tienen un filtro URL real y
+    confirmado en Pisos.com — para cualquier otro tag se devuelve un
+    conjunto vacío en vez de inventar una URL que no se ha confirmado)."""
+    segment = _TAG_URL_SEGMENTS.get(tag)
+    if segment is None:
         return set()
 
-    url = urljoin(BASE_URL, f"/venta/pisos-{province_slug}/{tag}/fecharecientedesde-desc/")
+    url = urljoin(BASE_URL, f"/venta/pisos-{province_slug}/{segment}/fecharecientedesde-desc/")
     cards = _fetch_cards(url)
     return {listing["external_id"] for listing in cards if listing.get("external_id")}
 

@@ -39,6 +39,7 @@ export type FilterPatch = {
   m2_min?: number | null;
   requires_elevator?: boolean;
   floor_preference?: string | null;
+  requires_garage?: boolean;
 };
 
 export type ActionResult = { error?: string };
@@ -116,9 +117,10 @@ export async function addFilter(): Promise<ActionResult & { filter?: FilterRow }
       group_id: groupId,
       requires_elevator: false,
       floor_preference: null,
+      requires_garage: false,
     })
     .select(
-      "id, profile_name, zona, property_type, price_max, bedrooms_min, bathrooms_min, m2_min, active, requires_elevator, floor_preference"
+      "id, profile_name, zona, property_type, price_max, bedrooms_min, bathrooms_min, m2_min, active, requires_elevator, floor_preference, requires_garage"
     )
     .single();
 

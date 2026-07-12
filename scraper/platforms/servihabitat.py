@@ -57,6 +57,16 @@ Ascensor y planta (sesión 2026-07-11, filtros nuevos):
   igual que el patrón ya documentado de "fallback cerca de"). Conclusión:
   Servihabitat no expone la planta del anuncio en ningún sitio accesible
   sin abrir cada ficha individual — floor queda siempre en None.
+
+Cochera/garaje (sesión 2026-07-12, filtro nuevo):
+- t-garaje es un filtro URL real, mismo patrón que t-piscina/t-ascensor —
+  comprobado con datos reales (Málaga: 12 tarjetas sin filtrar -> 5 con
+  t-garaje, conjunto realmente distinto). Tampoco hizo falta tocar este
+  módulo: "garaje" funciona automáticamente igual que "ascensor" en
+  cuanto main.py lo pide. (El array productExtra de cada tarjeta también
+  trae "garage" directamente y habría servido como señal alternativa, ver
+  nota de "Planta" arriba, pero no hace falta — el filtro URL ya es
+  fiable y no añade una petición extra por tarjeta.)
 """
 import re
 from urllib.parse import urljoin

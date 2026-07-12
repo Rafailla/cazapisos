@@ -74,4 +74,9 @@ def _matches_one(listing: dict, f: dict) -> bool:
     if floor_preference and listing.get("floor") != floor_preference:
         return False
 
+    # requires_garage=true: mismo criterio exacto que requires_elevator —
+    # has_garage=None (plataforma sin dato) NO matchea.
+    if f.get("requires_garage") and listing.get("has_garage") is not True:
+        return False
+
     return True

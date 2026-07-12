@@ -101,6 +101,7 @@ def touch_listing(
     condition: str | None,
     has_elevator: bool | None = None,
     floor: str | None = None,
+    has_garage: bool | None = None,
 ) -> None:
     (
         get_client()
@@ -112,6 +113,7 @@ def touch_listing(
                 "condition": condition,
                 "has_elevator": has_elevator,
                 "floor": floor,
+                "has_garage": has_garage,
             }
         )
         .eq("id", listing_id)

@@ -73,11 +73,13 @@ def _process_platform(platform: dict, filters: list[dict]) -> tuple[int, int, bo
         nueva_ids: set[str] = set()
         segunda_mano_ids: set[str] = set()
         ascensor_ids: set[str] = set()
+        garaje_ids: set[str] = set()
         if tag_fetch:
             pool_ids = tag_fetch(slug, "piscina")
             nueva_ids = tag_fetch(slug, "aestrenar")
             segunda_mano_ids = tag_fetch(slug, "segundamano")
             ascensor_ids = tag_fetch(slug, "ascensor")
+            garaje_ids = tag_fetch(slug, "garaje")
 
         for listing in fetch(slug):
             external_id = listing["external_id"]
@@ -113,6 +115,15 @@ def _process_platform(platform: dict, filters: list[dict]) -> tuple[int, int, bo
             else:
                 has_elevator = external_id in ascensor_ids
             listing["has_elevator"] = has_elevator
+            # has_garage: mismo criterio None-aware que has_elevator (ver
+            # comentario arriba) — "garaje" también es un filtro URL real
+            # y confirmado en Servihabitat/Pisos.com, así que el mismo
+            # razonamiento aplica.
+            if "has_garage" in listing:
+                has_garage = listing["has_garage"]
+            else:
+                has_garage = external_id in garaje_ids
+            listing["has_garage"] = has_garage
             # floor: siempre resuelto directo por la propia plataforma (o
             # None si no aplica/no lo expone) — ninguna de las 4 tiene un
             # filtro URL de planta real, así que no hay tags que cruzar.
@@ -126,7 +137,7 @@ def _process_platform(platform: dict, filters: list[dict]) -> tuple[int, int, bo
             existing = db.find_listing(platform["id"], dedup_hash)
 
             if existing:
-                db.touch_listing(existing["id"], ahora, has_pool, condition, has_elevator, floor)
+                db.touch_listing(existing["id"], ahora, has_pool, condition, has_elevator, floor, has_garage)
                 existentes += 1
             else:
                 inserted = db.insert_listing(
@@ -146,6 +157,7 @@ def _process_platform(platform: dict, filters: list[dict]) -> tuple[int, int, bo
                         "condition": condition,
                         "has_elevator": has_elevator,
                         "floor": floor,
+                        "has_garage": has_garage,
                     }
                 )
                 nuevos += 1

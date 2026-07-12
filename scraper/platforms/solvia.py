@@ -94,6 +94,11 @@ Investigación real contra el sitio (2026-07-09):
   no la planta del anuncio. Conclusión: Solvia genuinamente no expone
   ninguno de los dos — has_elevator y floor quedan siempre en None
   (nunca False/inventado).
+- Cochera/garaje (sesión 2026-07-12, filtro nuevo): a diferencia de
+  ascensor/planta, SÍ hay una señal real — caracteristicas.garaje (bool)
+  viene directo por anuncio, con variación real comprobada (140
+  residenciales de Málaga: 98 con garaje=false, 42 con garaje=true). Se
+  usa tal cual, sin cruzar tags.
 - Página de ficha de cada anuncio (para construir la URL), patrón
   confirmado con petición real (200 OK):
       /es/comprar/{tipoVivienda.amigable}/{provincia.amigable}/
@@ -207,6 +212,7 @@ def _parse_item(item: dict) -> dict | None:
         "address": item.get("direccion"),
         "tags": [],
         "has_pool": bool(caracteristicas.get("piscina")),
+        "has_garage": bool(caracteristicas.get("garaje")),
         # Hecho estructural del catálogo (obra nueva vive aparte en
         # /es/obra-nueva), no un valor inventado — ver docstring del módulo.
         "condition": "segunda_mano",

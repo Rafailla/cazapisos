@@ -10,6 +10,7 @@ export type FilterRow = {
   active: boolean;
   requires_elevator: boolean;
   floor_preference: string | null;
+  requires_garage: boolean;
 };
 
 export type RecipientRow = {
