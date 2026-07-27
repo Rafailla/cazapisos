@@ -1,7 +1,7 @@
 """Punto de entrada del scraper."""
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import config
 import db
@@ -10,8 +10,6 @@ import emailer
 import excel_export
 import matching
 from platforms import aliseda, pisos, servihabitat, solvia
-
-DIAS_SIN_NOVEDADES_ALERTA = 5
 
 # Registro de scrapers por nombre de plataforma. Las plataformas activas que no
 # tengan `search_url_base` relleno (o que no tengan scraper implementado
@@ -256,11 +254,20 @@ def main() -> int:
                 excel_path = excel_export.build_listings_excel(listings_grupo)
                 emailer.send_new_listings_email(recipients, excel_path, count_nuevos_grupo)
 
-        ahora = datetime.now(timezone.utc)
-        for stale in db.get_stale_platforms(DIAS_SIN_NOVEDADES_ALERTA):
-            referencia = stale.get("last_new_listing_at") or stale.get("created_at")
-            dias = (ahora - datetime.fromisoformat(referencia)).days
-            emailer.send_platform_alert_email(stale["name"], dias)
+        # Digest mensual de plataformas posiblemente rotas: un único email a
+        # system_alerts, como mucho una vez cada platform_alert_interval_days
+        # días (nunca uno por plataforma en cada ejecución, ver
+        # send_platform_health_digest_email).
+        interval = int(db.get_app_setting("platform_alert_interval_days", "30"))
+        stale_days = int(db.get_app_setting("platform_stale_days", "5"))
+        stale = db.get_stale_platforms(stale_days)
+        if stale:
+            last_raw = db.get_app_setting("last_platform_alert_sent_at", None)
+            now = datetime.now(timezone.utc)
+            due = (last_raw is None) or (now - datetime.fromisoformat(last_raw) >= timedelta(days=interval))
+            if due:
+                emailer.send_platform_health_digest_email(stale)
+                db.set_app_setting("last_platform_alert_sent_at", now.isoformat())
 
     except Exception as exc:
         status = "error"

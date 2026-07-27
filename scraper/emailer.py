@@ -47,14 +47,23 @@ def send_new_listings_email(recipients: list[str], excel_path: str, count_new: i
     )
 
 
-def send_platform_alert_email(platform_name: str, days_without_new: int) -> None:
+def send_platform_health_digest_email(stale: list[dict]) -> None:
+    """Un solo email resumen (nunca uno por plataforma) a los recipients
+    tipo system_alerts — los de new_listings nunca lo reciben, ver
+    get_active_recipients."""
     recipients = [r["email"] for r in db.get_active_recipients("system_alerts")]
     if not recipients:
         return
 
+    lineas = [f"- {p['name']}: {p['days_without_new']} días sin anuncios nuevos" for p in stale]
+    body = (
+        f"{len(stale)} plataforma(s) llevan tiempo sin aportar ningún anuncio nuevo. "
+        "Puede que hayan cambiado de HTML y el scraper haya dejado de funcionar. "
+        "Conviene revisarlas:\n\n" + "\n".join(lineas)
+    )
+
     _send(
         recipients,
-        subject=f"cazapisos: posible fallo en {platform_name}",
-        body=f"{platform_name} lleva {days_without_new} días sin aportar ningún anuncio nuevo. "
-        "Puede que la plataforma haya cambiado de HTML y el scraper haya dejado de funcionar.",
+        subject=f"cazapisos: informe de plataformas — {len(stale)} posible(s) fallo(s)",
+        body=body,
     )

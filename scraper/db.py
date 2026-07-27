@@ -80,18 +80,28 @@ def mark_listing_duplicate(listing_id: str, duplicate_group_id: str) -> None:
     )
 
 
-def get_app_setting(key: str, default: float) -> float:
-    """Lee un valor numérico de app_settings (mismo patrón que
-    getSearchCooldownHours en webapp/lib/rateLimit.ts): si la fila no
-    existe o su value no es un número válido, se usa el default en vez de
-    romper — nunca debe bloquear una ejecución por un ajuste mal puesto."""
+def get_app_setting(key: str, default=None):
+    """Lee un valor de app_settings (mismo patrón que getSearchCooldownHours
+    en webapp/lib/rateLimit.ts): si la fila no existe, se usa el default en
+    vez de romper — nunca debe bloquear una ejecución por un ajuste mal
+    puesto. Si `default` es float, el value se intenta convertir a float
+    (mismo comportamiento de siempre para dedup_price_margin_pct/
+    dedup_m2_margin, ver dedup.py); si no, se devuelve el value tal cual
+    (texto), que es lo que necesitan los ajustes de fecha/intervalo."""
     response = get_client().table("app_settings").select("value").eq("key", key).execute()
     if not response.data:
         return default
-    try:
-        return float(response.data[0]["value"])
-    except (TypeError, ValueError):
-        return default
+    value = response.data[0]["value"]
+    if isinstance(default, float):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+    return value
+
+
+def set_app_setting(key: str, value) -> None:
+    get_client().table("app_settings").upsert({"key": key, "value": str(value)}, on_conflict="key").execute()
 
 
 def touch_listing(
@@ -168,15 +178,25 @@ def update_platform_check_result(platform_id: str, new_count: int) -> None:
 
 def get_stale_platforms(days: int = 5) -> list[dict]:
     """Plataformas activas sin ningún anuncio nuevo desde hace `days` días
-    (o, si nunca han aportado ninguno, creadas hace más de `days` días)."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    (o, si nunca han aportado ninguno, creadas hace más de `days` días).
+    Devuelve una lista de {'name', 'days_without_new'}, de más días a
+    menos."""
+    ahora = datetime.now(timezone.utc)
+    cutoff = ahora - timedelta(days=days)
     stale = []
     for platform in get_active_platforms():
         reference = platform.get("last_new_listing_at") or platform.get("created_at")
         if reference is None:
             continue
-        if datetime.fromisoformat(reference) < cutoff:
-            stale.append(platform)
+        reference_dt = datetime.fromisoformat(reference)
+        if reference_dt < cutoff:
+            stale.append(
+                {
+                    "name": platform["name"],
+                    "days_without_new": (ahora - reference_dt).days,
+                }
+            )
+    stale.sort(key=lambda p: p["days_without_new"], reverse=True)
     return stale
 
 
