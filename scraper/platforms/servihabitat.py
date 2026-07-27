@@ -74,6 +74,8 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 
+from .image_utils import resolve_image_url
+
 BASE_URL = "https://www.servihabitat.com"
 SEARCH_PATH = "/es/venta/vivienda/"
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; cazapisos-bot/1.0)"}
@@ -144,6 +146,20 @@ def _parse_card(card) -> dict:
         es_llaves = "llaves" in el.get("class", [])
         tags.append("llaves_no_disponibles" if es_llaves else "incluye_otros_inmuebles")
 
+    # Foto principal del card (sesión 2026-07-27): cada tarjeta trae un
+    # carrusel de fotos, todas con class="img-car" — la primera es la que se
+    # ve por defecto (con `src` directo, no lazy) y confirmada con datos
+    # reales que nunca es el logo del propietario (ese vive aparte, dentro
+    # de un div.logo-propietario, sin la clase img-car). Defensivo: si algo
+    # falla o no hay ninguna, image_url queda en None, nunca tumba el resto
+    # del parseo del card.
+    image_url = None
+    try:
+        img_tag = card.find("img", class_="img-car")
+        image_url = resolve_image_url(img_tag, BASE_URL)
+    except Exception:
+        image_url = None
+
     return {
         "external_id": external_id,
         "url": url,
@@ -155,6 +171,7 @@ def _parse_card(card) -> dict:
         "municipality": municipality,
         "address": address_text,
         "tags": tags,
+        "image_url": image_url,
     }
 
 

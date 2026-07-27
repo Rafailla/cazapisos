@@ -135,7 +135,10 @@ def _process_platform(platform: dict, filters: list[dict]) -> tuple[int, int, bo
             existing = db.find_listing(platform["id"], dedup_hash)
 
             if existing:
-                db.touch_listing(existing["id"], ahora, has_pool, condition, has_elevator, floor, has_garage)
+                db.touch_listing(
+                    existing["id"], ahora, has_pool, condition, has_elevator, floor, has_garage,
+                    listing.get("image_url"),
+                )
                 existentes += 1
             else:
                 inserted = db.insert_listing(
@@ -156,6 +159,7 @@ def _process_platform(platform: dict, filters: list[dict]) -> tuple[int, int, bo
                         "has_elevator": has_elevator,
                         "floor": floor,
                         "has_garage": has_garage,
+                        "image_url": listing.get("image_url"),
                     }
                 )
                 nuevos += 1
