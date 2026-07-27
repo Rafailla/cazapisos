@@ -196,6 +196,23 @@ def _count_new_for_group(nuevos_listings: list[dict], filter_ids_grupo: set[str]
     return sum(1 for listing in nuevos_listings if filter_ids_grupo & set(listing.get("matched_filter_ids") or []))
 
 
+def _new_listings_for_group(
+    listings: list[dict], nuevos_listings: list[dict], filter_ids_grupo: set[str]
+) -> list[dict]:
+    """Los dicts que arma _process_platform para nuevos_listings solo traen
+    los campos que necesita dedup.py (id/platform_id/price/m2/bedrooms/
+    bathrooms/municipality/address/matched_filter_ids) — no url, tipo,
+    plataforma, etc. `listings` (de db.get_available_listings()) sí trae
+    TODOS los campos, incluido platform_name ya aplanado, para cualquier
+    listing disponible. Se cruzan por id para devolver, con todos los datos
+    disponibles (para el cuerpo HTML del email), solo los NUEVOS de esta
+    ejecución que le corresponden a este grupo."""
+    ids_nuevos_grupo = {
+        n["id"] for n in nuevos_listings if filter_ids_grupo & set(n.get("matched_filter_ids") or [])
+    }
+    return [listing for listing in listings if listing.get("id") in ids_nuevos_grupo]
+
+
 def main() -> int:
     trigger_type = os.environ.get("TRIGGER_TYPE", "manual")
     total_nuevos = 0
@@ -248,11 +265,12 @@ def main() -> int:
                     continue
 
                 count_nuevos_grupo = _count_new_for_group(todos_nuevos_listings, filter_ids_grupo)
+                nuevos_listings_grupo = _new_listings_for_group(listings, todos_nuevos_listings, filter_ids_grupo)
                 recipients = [
                     r["email"] for r in db.get_active_recipients_by_group(grupo["id"], "new_listings")
                 ]
                 excel_path = excel_export.build_listings_excel(listings_grupo)
-                emailer.send_new_listings_email(recipients, excel_path, count_nuevos_grupo)
+                emailer.send_new_listings_email(recipients, excel_path, count_nuevos_grupo, nuevos_listings_grupo)
 
         # Digest mensual de plataformas posiblemente rotas: un único email a
         # system_alerts, como mucho una vez cada platform_alert_interval_days
